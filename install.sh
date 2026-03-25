@@ -69,11 +69,7 @@ sed \
   -e "s|Path.home() / \"Documents/Claude Cowork/claude-sessions\"|Path(\"${OUTPUT_DIR}\")|g" \
   "$SCRIPT_DIR/add-session-tags.py" > "$CLAUDE_DIR/scripts/add-session-tags.py"
 
-# 사용자 태그 룰 파일 — 없을 때만 샘플 복사
-if [ ! -f "$CLAUDE_DIR/session-tag-rules.json" ]; then
-  cp "$SCRIPT_DIR/session-tag-rules.example.json" "$CLAUDE_DIR/session-tag-rules.json"
-  yellow "  개인 태그 룰 파일 생성: $CLAUDE_DIR/session-tag-rules.json"
-fi
+# session-tag-rules.json, session-synonyms.json은 첫 실행 시 스크립트가 자동 생성
 
 green "  완료"
 

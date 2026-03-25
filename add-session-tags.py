@@ -2,6 +2,8 @@
 """
 세션 파일에 **Tags**: 메타데이터 일괄 추가
 내용 분석 → 카테고리 태그 자동 부여
+
+태그 룰: ~/.claude/session-tag-rules.json (없으면 기본값으로 자동 생성)
 """
 
 import json
@@ -10,10 +12,9 @@ import sys
 from pathlib import Path
 
 SESSIONS_DIR = Path.home() / "Documents/Claude Cowork/claude-sessions"
-USER_RULES_FILE = Path.home() / ".claude/session-tag-rules.json"
+TAG_RULES_FILE = Path.home() / ".claude/session-tag-rules.json"
 
-# 태그 → 매칭 키워드 (소문자, 파일명·폴더명·내용 전체에서 검색)
-TAG_RULES: dict[str, list[str]] = {
+DEFAULT_TAG_RULES: dict[str, list[str]] = {
     "code-review":  ["코드리뷰", "코드 리뷰", "code review", "pr 리뷰", "pr리뷰", "리뷰 반영", "리뷰 준비", "review"],
     "compose":      ["compose", "composable", "컴포즈", "jetpack"],
     "android":      ["android", "안드로이드", "activity", "fragment", "viewmodel", "kotlin"],
@@ -37,17 +38,27 @@ TAG_RULES: dict[str, list[str]] = {
 }
 
 
-def load_user_rules() -> dict[str, list[str]]:
-    """~/.claude/session-tag-rules.json 에서 사용자 정의 룰 로드"""
-    if not USER_RULES_FILE.exists():
-        return {}
-    try:
-        data = json.loads(USER_RULES_FILE.read_text())
-        if isinstance(data, dict):
-            return {k: v for k, v in data.items() if isinstance(v, list)}
-    except Exception as e:
-        print(f"[WARN] {USER_RULES_FILE} 로드 실패: {e}", file=sys.stderr)
-    return {}
+def load_tag_rules() -> dict[str, list[str]]:
+    """TAG_RULES_FILE 로드. 없으면 기본값으로 파일 생성."""
+    if TAG_RULES_FILE.exists():
+        try:
+            data = json.loads(TAG_RULES_FILE.read_text())
+            if isinstance(data, dict):
+                return {k: v for k, v in data.items()
+                        if isinstance(v, list) and not k.startswith("_")}
+        except Exception as e:
+            print(f"[WARN] {TAG_RULES_FILE} 로드 실패, 기본값 사용: {e}", file=sys.stderr)
+            return DEFAULT_TAG_RULES.copy()
+    # 파일 없음 → 기본값으로 생성
+    TAG_RULES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    TAG_RULES_FILE.write_text(
+        json.dumps(DEFAULT_TAG_RULES, ensure_ascii=False, indent=2) + "\n"
+    )
+    print(f"[INFO] 태그 룰 파일 생성: {TAG_RULES_FILE}")
+    return DEFAULT_TAG_RULES.copy()
+
+
+TAG_RULES = load_tag_rules()
 
 
 def determine_tags(folder: str, filename: str, content: str) -> list[str]:
@@ -77,21 +88,17 @@ def insert_tags(content: str, tags: list[str]) -> str:
     """**Duration** 또는 **Model** 줄 다음에 Tags 삽입"""
     tag_line = f"- **Tags**: {', '.join(tags)}"
 
-    # Duration 뒤에 삽입
     m = re.search(r"(- \*\*Duration\*\*: .+)", content)
     if m:
         return content.replace(m.group(1), m.group(1) + "\n" + tag_line, 1)
 
-    # Duration 없으면 Model 뒤에
     m = re.search(r"(- \*\*Model\*\*: .+)", content)
     if m:
         return content.replace(m.group(1), m.group(1) + "\n" + tag_line, 1)
 
-    # 둘 다 없으면 첫 번째 빈 줄 앞에
     m = re.search(r"(\n\n)", content)
     if m:
-        idx = m.start()
-        return content[:idx] + "\n" + tag_line + content[idx:]
+        return content[:m.start()] + "\n" + tag_line + content[m.start():]
 
     return content + "\n" + tag_line
 
@@ -105,16 +112,6 @@ def replace_tags(content: str, tags: list[str]) -> str:
 def main():
     dry_run = "--dry-run" in sys.argv
     update = "--update" in sys.argv
-
-    # 사용자 룰 로드 후 기본 룰에 병합 (사용자 룰이 기본 룰 확장)
-    user_rules = load_user_rules()
-    for tag, keywords in user_rules.items():
-        if tag in TAG_RULES:
-            TAG_RULES[tag] = list(dict.fromkeys(TAG_RULES[tag] + keywords))
-        else:
-            TAG_RULES[tag] = keywords
-    if user_rules:
-        print(f"[INFO] 사용자 룰 {len(user_rules)}개 로드: {', '.join(user_rules)}")
 
     files = sorted(SESSIONS_DIR.rglob("*.md"))
     files = [f for f in files if f.name != "index.md"]
@@ -145,7 +142,6 @@ def main():
         tag_str = ", ".join(tags)
 
         if has_tags:
-            # 기존 태그와 동일하면 스킵
             existing_m = re.search(r"\*\*Tags\*\*: (.+)", content, re.IGNORECASE)
             if existing_m and existing_m.group(1).strip() == tag_str:
                 skipped += 1
