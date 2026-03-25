@@ -3,7 +3,7 @@
 세션 파일에 **Tags**: 메타데이터 일괄 추가
 내용 분석 → 카테고리 태그 자동 부여
 
-태그 룰: ~/.claude/session-tag-rules.json (없으면 기본값으로 자동 생성)
+태그 룰: ~/.claude/session-tag-rules.json
 """
 
 import json
@@ -14,48 +14,19 @@ from pathlib import Path
 SESSIONS_DIR = Path.home() / "Documents/Claude Cowork/claude-sessions"
 TAG_RULES_FILE = Path.home() / ".claude/session-tag-rules.json"
 
-DEFAULT_TAG_RULES: dict[str, list[str]] = {
-    "code-review":  ["코드리뷰", "코드 리뷰", "code review", "pr 리뷰", "pr리뷰", "리뷰 반영", "리뷰 준비", "review"],
-    "compose":      ["compose", "composable", "컴포즈", "jetpack"],
-    "android":      ["android", "안드로이드", "activity", "fragment", "viewmodel", "kotlin"],
-    "tdd":          ["tdd", " 테스트 케이스", "unit test", "테스팅"],
-    "debugging":    ["디버깅", "debug", "crash", "크래시", "오류 수정", "에러 해결", "컴파일 오류", "컴파일 에러"],
-    "refactoring":  ["리팩터링", "리팩토링", "refactor", "stepprofile", "리펙토링"],
-    "planning":     ["플랜", "planning", "브레인스토밍", "brainstorm", "설계", "계획"],
-    "build":        ["빌드", "gradle", "컴파일", "compile"],
-    "skill":        ["스킬", "skill", "command"],
-    "hook":         ["훅", "hook"],
-    "worktree":     ["워크트리", "worktree"],
-    "git":          ["커밋", "commit", "branch", "push", "pull request"],
-    "claude-code":  ["claude code", "claude-code", "claude 설정", "mcp"],
-    "jira":         ["jira", "티켓 작업"],
-    "slack":        ["slack"],
-    "deploy":       ["배포", "deploy", "release", "릴리즈"],
-    "performance":  ["성능", "performance", "최적화", "optimization"],
-    "weekly":       ["주간", "weekly", "weekly summary"],
-    "daily":        ["daily", "데일리"],
-    "pr":           ["pr #", "pull request", "pr 리뷰", "pr리뷰", "코드 리뷰"],
-}
-
-
 def load_tag_rules() -> dict[str, list[str]]:
-    """TAG_RULES_FILE 로드. 없으면 기본값으로 파일 생성."""
-    if TAG_RULES_FILE.exists():
-        try:
-            data = json.loads(TAG_RULES_FILE.read_text())
-            if isinstance(data, dict):
-                return {k: v for k, v in data.items()
-                        if isinstance(v, list) and not k.startswith("_")}
-        except Exception as e:
-            print(f"[WARN] {TAG_RULES_FILE} 로드 실패, 기본값 사용: {e}", file=sys.stderr)
-            return DEFAULT_TAG_RULES.copy()
-    # 파일 없음 → 기본값으로 생성
-    TAG_RULES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TAG_RULES_FILE.write_text(
-        json.dumps(DEFAULT_TAG_RULES, ensure_ascii=False, indent=2) + "\n"
-    )
-    print(f"[INFO] 태그 룰 파일 생성: {TAG_RULES_FILE}")
-    return DEFAULT_TAG_RULES.copy()
+    """TAG_RULES_FILE 로드."""
+    if not TAG_RULES_FILE.exists():
+        print(f"[ERROR] 태그 룰 파일 없음: {TAG_RULES_FILE}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        data = json.loads(TAG_RULES_FILE.read_text())
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items()
+                    if isinstance(v, list) and not k.startswith("_")}
+    except Exception as e:
+        print(f"[ERROR] {TAG_RULES_FILE} 로드 실패: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 TAG_RULES = load_tag_rules()

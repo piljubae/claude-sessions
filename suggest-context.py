@@ -17,50 +17,22 @@ SHOWN_DIR = HOME / ".claude/session-context-shown"
 SYNONYMS_FILE = HOME / ".claude/session-synonyms.json"
 TICKET_PATTERN = re.compile(r"\b([A-Za-z]+-\d+)\b")
 
-DEFAULT_SYNONYM_GROUPS: list[list[str]] = [
-    ["코드리뷰", "코드 리뷰", "리뷰", "review", "code review", "pr review", "pull request"],
-    ["버그", "bug", "fix", "수정", "hotfix", "오류", "에러", "error", "crash", "크래시"],
-    ["리팩터링", "리팩토링", "refactor", "refactoring", "개선", "cleanup", "정리"],
-    ["테스트", "test", "testing", "unit test", "테스팅"],
-    ["배포", "deploy", "deployment", "release", "릴리즈", "cd"],
-    ["기능", "feature", "기능개발", "신규", "구현"],
-    ["성능", "performance", "최적화", "optimization", "perf", "속도"],
-    ["디버그", "debug", "debugging", "트러블슈팅", "troubleshooting"],
-    ["인증", "auth", "authentication", "login", "로그인"],
-    ["api", "endpoint", "서버", "server", "백엔드", "backend"],
-    ["컴포즈", "compose", "jetpack compose", "jetpack", "composable"],
-    ["안드로이드", "android"],
-    ["스킬", "skill", "skills", "command"],
-    ["훅", "hook", "hooks"],
-    ["worktree", "워크트리"],
-    ["플랜", "plan", "planning", "계획"],
-    ["빌드", "build", "gradle", "compile", "컴파일"],
-    ["마이그레이션", "migration", "migrate", "이전"],
-]
-
-
 def load_synonyms() -> dict[str, set[str]]:
-    """SYNONYMS_FILE 로드해 lookup dict 반환. 없으면 기본값으로 파일 생성."""
-    groups = DEFAULT_SYNONYM_GROUPS
-    if SYNONYMS_FILE.exists():
-        try:
-            data = json.loads(SYNONYMS_FILE.read_text())
-            if isinstance(data, list):
-                groups = data
-        except Exception:
-            pass
-    else:
-        SYNONYMS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        SYNONYMS_FILE.write_text(
-            json.dumps(DEFAULT_SYNONYM_GROUPS, ensure_ascii=False, indent=2) + "\n"
-        )
-
-    lookup: dict[str, set[str]] = {}
-    for group in groups:
-        s = set(group)
-        for term in s:
-            lookup[term] = s
-    return lookup
+    """SYNONYMS_FILE 로드해 lookup dict 반환."""
+    if not SYNONYMS_FILE.exists():
+        return {}
+    try:
+        data = json.loads(SYNONYMS_FILE.read_text())
+        if isinstance(data, list):
+            lookup: dict[str, set[str]] = {}
+            for group in data:
+                s = set(group)
+                for term in s:
+                    lookup[term] = s
+            return lookup
+    except Exception:
+        pass
+    return {}
 
 
 _SYNONYM_LOOKUP = load_synonyms()
