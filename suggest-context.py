@@ -16,6 +16,43 @@ SESSIONS_DIR = HOME / "Documents/Claude Cowork/claude-sessions"
 SHOWN_DIR = HOME / ".claude/session-context-shown"
 TICKET_PATTERN = re.compile(r"\b([A-Za-z]+-\d+)\b")
 
+# 동의어 그룹 (한국어 ↔ 영어 상호 확장)
+SYNONYM_GROUPS: list[set[str]] = [
+    {"코드리뷰", "코드 리뷰", "리뷰", "review", "code review", "pr review", "pull request"},
+    {"버그", "bug", "fix", "수정", "hotfix", "오류", "에러", "error", "crash", "크래시"},
+    {"리팩터링", "리팩토링", "refactor", "refactoring", "개선", "cleanup", "정리"},
+    {"테스트", "test", "testing", "unit test", "테스팅"},
+    {"배포", "deploy", "deployment", "release", "릴리즈", "cd"},
+    {"기능", "feature", "기능개발", "신규", "구현"},
+    {"성능", "performance", "최적화", "optimization", "perf", "속도"},
+    {"디버그", "debug", "debugging", "트러블슈팅", "troubleshooting"},
+    {"인증", "auth", "authentication", "login", "로그인"},
+    {"api", "endpoint", "서버", "server", "백엔드", "backend"},
+    {"컴포즈", "compose", "jetpack compose", "jetpack", "composable"},
+    {"안드로이드", "android"},
+    {"스킬", "skill", "skills", "command"},
+    {"훅", "hook", "hooks"},
+    {"worktree", "워크트리"},
+    {"플랜", "plan", "planning", "계획"},
+    {"빌드", "build", "gradle", "compile", "컴파일"},
+    {"마이그레이션", "migration", "migrate", "이전"},
+]
+
+_SYNONYM_LOOKUP: dict[str, set[str]] = {}
+for _group in SYNONYM_GROUPS:
+    for _term in _group:
+        _SYNONYM_LOOKUP[_term] = _group
+
+
+def expand_keywords(keywords: set[str]) -> set[str]:
+    """동의어로 키워드 확장"""
+    expanded = set()
+    for kw in keywords:
+        expanded.add(kw)
+        if kw in _SYNONYM_LOOKUP:
+            expanded |= _SYNONYM_LOOKUP[kw]
+    return expanded
+
 
 def is_first_message(session_id: str) -> bool:
     """이 세션에서 처음 호출인지 확인"""
@@ -73,8 +110,15 @@ def score_session(md_path: Path, ticket: str, project: str, keywords: set[str]) 
     if project and project.lower() in folder.lower():
         score += 3.0
 
-    # 키워드 매칭
+    # 태그 매칭 (가중치 높음)
     content_lower = content.lower()
+    tags_m = re.search(r"\*\*tags\*\*:\s*(.+)$", content_lower, re.MULTILINE)
+    if tags_m:
+        tags = {t.strip() for t in tags_m.group(1).split(",")}
+        matched_tags = sum(1 for kw in keywords if kw in tags)
+        score += matched_tags * 3.0
+
+    # 키워드 매칭 (동의어 포함)
     matched = sum(1 for kw in keywords if kw in content_lower)
     score += matched * 0.5
 
@@ -86,7 +130,7 @@ def find_similar_sessions(cwd: str, branch: str, prompt: str, top_n: int = 3) ->
         return []
 
     ticket = ""
-    m = TICKET_PATTERN.search(branch) or TICKET_PATTERN.search(cwd)
+    m = TICKET_PATTERN.search(branch) or TICKET_PATTERN.search(cwd) or TICKET_PATTERN.search(prompt)
     if m:
         ticket = m.group(1).upper()
 
@@ -100,7 +144,7 @@ def find_similar_sessions(cwd: str, branch: str, prompt: str, top_n: int = 3) ->
         if p != HOME and len(p.parts) > 3:
             project = p.name
 
-    keywords = extract_keywords(prompt)
+    keywords = expand_keywords(extract_keywords(prompt))
 
     results = []
     for md in SESSIONS_DIR.rglob("*.md"):
