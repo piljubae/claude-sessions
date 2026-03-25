@@ -96,8 +96,15 @@ def insert_tags(content: str, tags: list[str]) -> str:
     return content + "\n" + tag_line
 
 
+def replace_tags(content: str, tags: list[str]) -> str:
+    """기존 Tags 줄을 새 값으로 교체"""
+    tag_line = f"- **Tags**: {', '.join(tags)}"
+    return re.sub(r"- \*\*Tags\*\*: .+", tag_line, content, flags=re.IGNORECASE)
+
+
 def main():
     dry_run = "--dry-run" in sys.argv
+    update = "--update" in sys.argv
 
     # 사용자 룰 로드 후 기본 룰에 병합 (사용자 룰이 기본 룰 확장)
     user_rules = load_user_rules()
@@ -113,6 +120,7 @@ def main():
     files = [f for f in files if f.name != "index.md"]
 
     added = 0
+    updated = 0
     skipped = 0
 
     for path in files:
@@ -122,28 +130,41 @@ def main():
             print(f"[ERROR] {path}: {e}")
             continue
 
-        # 이미 Tags 있으면 스킵
-        if re.search(r"\*\*Tags\*\*:", content, re.IGNORECASE):
+        folder = path.parent.name
+        has_tags = bool(re.search(r"\*\*Tags\*\*:", content, re.IGNORECASE))
+
+        if has_tags and not update:
             skipped += 1
             continue
 
-        folder = path.parent.name
         tags = determine_tags(folder, path.stem, content)
         if not tags:
             skipped += 1
             continue
 
-        new_content = insert_tags(content, tags)
         tag_str = ", ".join(tags)
 
+        if has_tags:
+            # 기존 태그와 동일하면 스킵
+            existing_m = re.search(r"\*\*Tags\*\*: (.+)", content, re.IGNORECASE)
+            if existing_m and existing_m.group(1).strip() == tag_str:
+                skipped += 1
+                continue
+            new_content = replace_tags(content, tags)
+            label = "UPD"
+            updated += 1
+        else:
+            new_content = insert_tags(content, tags)
+            label = "OK "
+            added += 1
+
         if dry_run:
-            print(f"[DRY] {path.relative_to(SESSIONS_DIR)}  →  {tag_str}")
+            print(f"[DRY/{label}] {path.relative_to(SESSIONS_DIR)}  →  {tag_str}")
         else:
             path.write_text(new_content)
-            print(f"[OK]  {path.relative_to(SESSIONS_DIR)}  →  {tag_str}")
-        added += 1
+            print(f"[{label}]  {path.relative_to(SESSIONS_DIR)}  →  {tag_str}")
 
-    print(f"\n총 {len(files)}개 중 태그 추가: {added}개, 스킵: {skipped}개")
+    print(f"\n총 {len(files)}개 중 신규: {added}개, 업데이트: {updated}개, 스킵: {skipped}개")
 
 
 if __name__ == "__main__":
