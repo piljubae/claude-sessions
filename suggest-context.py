@@ -14,7 +14,38 @@ from datetime import datetime, timezone, timedelta
 HOME = Path.home()
 SESSIONS_DIR = HOME / "Documents/Claude Cowork/claude-sessions"
 SHOWN_DIR = HOME / ".claude/session-context-shown"
+SYNONYMS_FILE = HOME / ".claude/session-synonyms.json"
 TICKET_PATTERN = re.compile(r"\b([A-Za-z]+-\d+)\b")
+
+def load_synonyms() -> dict[str, set[str]]:
+    """SYNONYMS_FILE 로드해 lookup dict 반환."""
+    if not SYNONYMS_FILE.exists():
+        return {}
+    try:
+        data = json.loads(SYNONYMS_FILE.read_text())
+        if isinstance(data, list):
+            lookup: dict[str, set[str]] = {}
+            for group in data:
+                s = set(group)
+                for term in s:
+                    lookup[term] = s
+            return lookup
+    except Exception:
+        pass
+    return {}
+
+
+_SYNONYM_LOOKUP = load_synonyms()
+
+
+def expand_keywords(keywords: set[str]) -> set[str]:
+    """동의어로 키워드 확장"""
+    expanded = set()
+    for kw in keywords:
+        expanded.add(kw)
+        if kw in _SYNONYM_LOOKUP:
+            expanded |= _SYNONYM_LOOKUP[kw]
+    return expanded
 
 
 def is_first_message(session_id: str) -> bool:
@@ -73,8 +104,15 @@ def score_session(md_path: Path, ticket: str, project: str, keywords: set[str]) 
     if project and project.lower() in folder.lower():
         score += 3.0
 
-    # 키워드 매칭
+    # 태그 매칭 (가중치 높음)
     content_lower = content.lower()
+    tags_m = re.search(r"\*\*tags\*\*:\s*(.+)$", content_lower, re.MULTILINE)
+    if tags_m:
+        tags = {t.strip() for t in tags_m.group(1).split(",")}
+        matched_tags = sum(1 for kw in keywords if kw in tags)
+        score += matched_tags * 3.0
+
+    # 키워드 매칭 (동의어 포함)
     matched = sum(1 for kw in keywords if kw in content_lower)
     score += matched * 0.5
 
@@ -86,7 +124,7 @@ def find_similar_sessions(cwd: str, branch: str, prompt: str, top_n: int = 3) ->
         return []
 
     ticket = ""
-    m = TICKET_PATTERN.search(branch) or TICKET_PATTERN.search(cwd)
+    m = TICKET_PATTERN.search(branch) or TICKET_PATTERN.search(cwd) or TICKET_PATTERN.search(prompt)
     if m:
         ticket = m.group(1).upper()
 
@@ -100,7 +138,7 @@ def find_similar_sessions(cwd: str, branch: str, prompt: str, top_n: int = 3) ->
         if p != HOME and len(p.parts) > 3:
             project = p.name
 
-    keywords = extract_keywords(prompt)
+    keywords = expand_keywords(extract_keywords(prompt))
 
     results = []
     for md in SESSIONS_DIR.rglob("*.md"):

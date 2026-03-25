@@ -21,6 +21,8 @@ OUTPUT_DIR = HOME / "Documents/Claude Cowork/claude-sessions"
 PROCESSED_FILE = OUTPUT_DIR / ".processed"
 INDEX_FILE = OUTPUT_DIR / "index.md"
 CLAUDE_BIN = "/opt/homebrew/bin/claude"
+TAG_RULES_FILE = HOME / ".claude/session-tag-rules.json"
+SYNONYMS_FILE = HOME / ".claude/session-synonyms.json"
 
 TICKET_PATTERN = re.compile(r"\b([A-Za-z]+-\d+)\b")
 CONTINUATIONS_DIR = HOME / ".claude/session-continuations"
@@ -179,6 +181,103 @@ JSON만 응답하고 다른 텍스트는 포함하지 마세요."""
     }
 
 
+def suggest_new_mappings(new_sessions: list[dict]) -> None:
+    """새 세션 배치 분석 → 신규 태그 룰/동의어 제안 → JSON 파일 병합"""
+    if not new_sessions:
+        return
+
+    tag_rules: dict = {}
+    if TAG_RULES_FILE.exists():
+        try:
+            tag_rules = json.loads(TAG_RULES_FILE.read_text())
+        except Exception:
+            pass
+
+    synonyms: list = []
+    if SYNONYMS_FILE.exists():
+        try:
+            synonyms = json.loads(SYNONYMS_FILE.read_text())
+        except Exception:
+            pass
+
+    session_texts = "\n".join(
+        f"- 제목: {s['title']}\n  요약: {s['summary'][:200]}"
+        for s in new_sessions[:20]
+    )
+    existing_tags = ", ".join(tag_rules.keys())
+    sample_synonyms = [g[:3] for g in synonyms[:8]]
+
+    prompt = f"""세션 태그 시스템에 새 세션들이 추가됐습니다. 기존 룰에 없거나 부족한 태그/동의어를 제안해주세요.
+
+현재 태그 목록: {existing_tags}
+현재 동의어 샘플: {sample_synonyms}
+
+새 세션 목록:
+{session_texts}
+
+규칙:
+- 기존 태그에 빠진 키워드 추가 (extend_tag_rules)
+- 완전히 새 카테고리 추가 (new_tag_rules)
+- 새 동의어 그룹 추가 (new_synonym_groups)
+- 추가할 게 없으면 빈 값으로
+
+JSON만 응답:
+{{
+  "new_tag_rules": {{"태그명": ["키워드1", "키워드2"]}},
+  "extend_tag_rules": {{"기존태그명": ["추가키워드"]}},
+  "new_synonym_groups": [["유사어1", "유사어2"]]
+}}"""
+
+    try:
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+        result = subprocess.run(
+            [CLAUDE_BIN, "-p", "--no-session-persistence", "--model", "haiku"],
+            input=prompt, capture_output=True, text=True, timeout=60, env=env,
+        )
+        json_match = re.search(r"\{.*\}", result.stdout.strip(), re.DOTALL)
+        if not json_match:
+            print("  응답 파싱 실패")
+            return
+        suggestions = json.loads(json_match.group())
+    except Exception as e:
+        print(f"  [WARN] 매핑 제안 실패: {e}")
+        return
+
+    tag_changed = False
+    for tag, kws in suggestions.get("new_tag_rules", {}).items():
+        if tag not in tag_rules and isinstance(kws, list) and kws:
+            tag_rules[tag] = kws
+            print(f"  [태그 신규] {tag}: {kws}")
+            tag_changed = True
+
+    for tag, kws in suggestions.get("extend_tag_rules", {}).items():
+        if tag in tag_rules and isinstance(kws, list):
+            existing = set(tag_rules[tag])
+            additions = [k for k in kws if k not in existing]
+            if additions:
+                tag_rules[tag] = tag_rules[tag] + additions
+                print(f"  [태그 확장] {tag}: +{additions}")
+                tag_changed = True
+
+    if tag_changed:
+        TAG_RULES_FILE.write_text(json.dumps(tag_rules, ensure_ascii=False, indent=2) + "\n")
+
+    syn_changed = False
+    existing_terms = {term for group in synonyms for term in group}
+    for group in suggestions.get("new_synonym_groups", []):
+        if isinstance(group, list) and not any(t in existing_terms for t in group):
+            synonyms.append(group)
+            existing_terms.update(group)
+            print(f"  [동의어 추가] {group}")
+            syn_changed = True
+
+    if syn_changed:
+        SYNONYMS_FILE.write_text(json.dumps(synonyms, ensure_ascii=False, indent=2) + "\n")
+
+    if not tag_changed and not syn_changed:
+        print("  신규 매핑 없음")
+
+
 def get_chosen_file(session_id: str) -> Path | None:
     """이 세션이 이어쓰기로 선택된 파일 경로 반환"""
     marker = CONTINUATIONS_DIR / f"{session_id}.chosen"
@@ -330,6 +429,7 @@ def process_sessions(recent_only: bool = False, regen: bool = False):
 
     new_count = 0
     index_entries = []
+    new_sessions_data: list[dict] = []
 
     meta_files = sorted(META_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
 
@@ -410,6 +510,10 @@ def process_sessions(recent_only: bool = False, regen: bool = False):
         write_session_file(output_path, meta, details, summary_data)
         processed.add(sid)
         new_count += 1
+        new_sessions_data.append({
+            "title": summary_data["title"],
+            "summary": summary_data.get("summary", ""),
+        })
 
         print(f" → {folder}/{filename}")
 
@@ -448,12 +552,21 @@ def process_sessions(recent_only: bool = False, regen: bool = False):
     print(f"\n완료: {new_count}개 신규 처리, 총 {len(all_entries)}개 항목")
     print(f"출력 디렉토리: {OUTPUT_DIR}")
 
+    if new_sessions_data:
+        print("\n[매핑 분석] 신규 태그 룰/동의어 탐색 중...")
+        suggest_new_mappings(new_sessions_data)
+
 
 def main():
     recent_only = "--recent" in sys.argv
     regen = "--regen" in sys.argv
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     process_sessions(recent_only=recent_only, regen=regen)
+
+    # 신규 세션 요약 후 태그 자동 추가
+    tagger = Path.home() / ".claude/scripts/add-session-tags.py"
+    if tagger.exists():
+        subprocess.run([sys.executable, str(tagger)], check=False)
 
 
 if __name__ == "__main__":

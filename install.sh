@@ -40,6 +40,7 @@ echo ""
 yellow "[1/6] 디렉토리 생성..."
 mkdir -p "$HOME_DIR/scripts"
 mkdir -p "$CLAUDE_DIR/scripts"
+mkdir -p "$CLAUDE_DIR/logs"
 mkdir -p "$CLAUDE_DIR/skills/organize-sessions"
 mkdir -p "$CLAUDE_DIR/session-continuations"
 mkdir -p "$CLAUDE_DIR/session-context-shown"
@@ -63,6 +64,17 @@ sed \
   -e "s|HOME / \"Documents/Claude Cowork/claude-sessions\"|Path(\"${OUTPUT_DIR}\")|g" \
   "$SCRIPT_DIR/suggest-context.py" > "$CLAUDE_DIR/scripts/suggest-context.py"
 
+# add-session-tags.py 경로 수정 후 복사
+sed \
+  -e "s|Path.home() / \"Documents/Claude Cowork/claude-sessions\"|Path(\"${OUTPUT_DIR}\")|g" \
+  "$SCRIPT_DIR/add-session-tags.py" > "$CLAUDE_DIR/scripts/add-session-tags.py"
+
+# 기본 룰 파일 복사 (없을 때만)
+[ ! -f "$CLAUDE_DIR/session-tag-rules.json" ] && \
+  cp "$SCRIPT_DIR/session-tag-rules.default.json" "$CLAUDE_DIR/session-tag-rules.json"
+[ ! -f "$CLAUDE_DIR/session-synonyms.json" ] && \
+  cp "$SCRIPT_DIR/session-synonyms.default.json" "$CLAUDE_DIR/session-synonyms.json"
+
 green "  완료"
 
 # ─── 3. 스킬 설치 ────────────────────────────────────────────────────────────
@@ -82,10 +94,9 @@ fi
 
 # ─── 5. LaunchAgent 등록 ─────────────────────────────────────────────────────
 echo ""
-yellow "[5/6] LaunchAgent 등록 (매일 09:00 자동 실행)..."
+yellow "[5/6] LaunchAgent 등록 (매시간 자동 실행)..."
 
 PLIST_PATH="$HOME_DIR/Library/LaunchAgents/com.claudesessions.organize.plist"
-ESCAPED_OUTPUT="${OUTPUT_DIR//&/\\&}"
 
 cat > "$PLIST_PATH" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -106,13 +117,8 @@ cat > "$PLIST_PATH" << EOF
         <key>HOME</key>
         <string>${HOME_DIR}</string>
     </dict>
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>9</integer>
-        <key>Minute</key>
-        <integer>0</integer>
-    </dict>
+    <key>StartInterval</key>
+    <integer>3600</integer>
     <key>StandardOutPath</key>
     <string>${OUTPUT_DIR}/organize-sessions.log</string>
     <key>StandardErrorPath</key>
