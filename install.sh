@@ -37,7 +37,7 @@ read -r -p "계속할까요? (y/N) " CONFIRM
 
 # ─── 1. 디렉토리 생성 ────────────────────────────────────────────────────────
 echo ""
-yellow "[1/7] 디렉토리 생성..."
+yellow "[1/6] 디렉토리 생성..."
 mkdir -p "$HOME_DIR/scripts"
 mkdir -p "$CLAUDE_DIR/scripts"
 mkdir -p "$CLAUDE_DIR/logs"
@@ -49,7 +49,7 @@ green "  완료"
 
 # ─── 2. Python 스크립트 설치 ─────────────────────────────────────────────────
 echo ""
-yellow "[2/7] 스크립트 설치..."
+yellow "[2/6] 스크립트 설치..."
 
 # organize-sessions.py 경로 수정 후 복사
 sed \
@@ -73,13 +73,13 @@ green "  완료"
 
 # ─── 3. 스킬 설치 ────────────────────────────────────────────────────────────
 echo ""
-yellow "[3/7] 글로벌 스킬 설치..."
+yellow "[3/6] 글로벌 스킬 설치..."
 cp "$SCRIPT_DIR/skill/SKILL.md" "$CLAUDE_DIR/skills/organize-sessions/SKILL.md"
 green "  완료"
 
 # ─── 4. anthropic 패키지 설치 ────────────────────────────────────────────────
 echo ""
-yellow "[4/7] anthropic 패키지 확인..."
+yellow "[4/6] anthropic 패키지 확인..."
 if python3 -c "import anthropic" 2>/dev/null; then
   green "  이미 설치됨"
 else
@@ -88,10 +88,9 @@ fi
 
 # ─── 5. LaunchAgent 등록 ─────────────────────────────────────────────────────
 echo ""
-yellow "[5/7] LaunchAgent 등록 (매일 09:00 자동 실행)..."
+yellow "[5/6] LaunchAgent 등록 (매시간 자동 실행)..."
 
 PLIST_PATH="$HOME_DIR/Library/LaunchAgents/com.claudesessions.organize.plist"
-ESCAPED_OUTPUT="${OUTPUT_DIR//&/\\&}"
 
 cat > "$PLIST_PATH" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -112,13 +111,8 @@ cat > "$PLIST_PATH" << EOF
         <key>HOME</key>
         <string>${HOME_DIR}</string>
     </dict>
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>9</integer>
-        <key>Minute</key>
-        <integer>0</integer>
-    </dict>
+    <key>StartInterval</key>
+    <integer>3600</integer>
     <key>StandardOutPath</key>
     <string>${OUTPUT_DIR}/organize-sessions.log</string>
     <key>StandardErrorPath</key>
@@ -133,43 +127,9 @@ launchctl unload "$PLIST_PATH" 2>/dev/null || true
 launchctl load "$PLIST_PATH"
 green "  완료"
 
-# ─── 6. 세션 태거 LaunchAgent 등록 ──────────────────────────────────────────
+# ─── 6. settings.json 훅 등록 ────────────────────────────────────────────────
 echo ""
-yellow "[6/7] 세션 태그 자동화 LaunchAgent 등록 (매시간)..."
-
-TAGGER_PLIST="$HOME_DIR/Library/LaunchAgents/com.claudesessions.tagger.plist"
-
-cat > "$TAGGER_PLIST" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.claudesessions.tagger</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/bin/python3</string>
-        <string>${CLAUDE_DIR}/scripts/add-session-tags.py</string>
-    </array>
-    <key>StartInterval</key>
-    <integer>3600</integer>
-    <key>RunAtLoad</key>
-    <false/>
-    <key>StandardOutPath</key>
-    <string>${CLAUDE_DIR}/logs/session-tagger.log</string>
-    <key>StandardErrorPath</key>
-    <string>${CLAUDE_DIR}/logs/session-tagger.err</string>
-</dict>
-</plist>
-EOF
-
-launchctl unload "$TAGGER_PLIST" 2>/dev/null || true
-launchctl load "$TAGGER_PLIST"
-green "  완료"
-
-# ─── 7. settings.json 훅 등록 ────────────────────────────────────────────────
-echo ""
-yellow "[7/7] Claude Code 훅 등록..."
+yellow "[6/6] Claude Code 훅 등록..."
 
 SETTINGS_FILE="$CLAUDE_DIR/settings.json"
 

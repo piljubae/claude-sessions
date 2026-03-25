@@ -455,6 +455,11 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     process_sessions(recent_only=recent_only, regen=regen)
 
+    # 신규 세션 요약 후 태그 자동 추가
+    tagger = Path.home() / ".claude/scripts/add-session-tags.py"
+    if tagger.exists():
+        subprocess.run([sys.executable, str(tagger)], check=False)
+
 
 if __name__ == "__main__":
     main()
