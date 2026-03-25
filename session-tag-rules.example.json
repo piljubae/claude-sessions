@@ -1,0 +1,5 @@
+{
+  "_comment": "개인 태그 룰. 기존 태그에 키워드 추가하거나 새 태그 정의 가능. ~/.claude/session-tag-rules.json 에 저장하세요.",
+  "my-project": ["프로젝트명", "project-name"],
+  "android": ["androidstudio", "android studio"]
+}

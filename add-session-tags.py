@@ -4,11 +4,13 @@
 내용 분석 → 카테고리 태그 자동 부여
 """
 
+import json
 import re
 import sys
 from pathlib import Path
 
 SESSIONS_DIR = Path.home() / "Documents/Claude Cowork/claude-sessions"
+USER_RULES_FILE = Path.home() / ".claude/session-tag-rules.json"
 
 # 태그 → 매칭 키워드 (소문자, 파일명·폴더명·내용 전체에서 검색)
 TAG_RULES: dict[str, list[str]] = {
@@ -33,6 +35,19 @@ TAG_RULES: dict[str, list[str]] = {
     "daily":        ["daily", "데일리"],
     "pr":           ["pr #", "pull request", "pr 리뷰", "pr리뷰", "코드 리뷰"],
 }
+
+
+def load_user_rules() -> dict[str, list[str]]:
+    """~/.claude/session-tag-rules.json 에서 사용자 정의 룰 로드"""
+    if not USER_RULES_FILE.exists():
+        return {}
+    try:
+        data = json.loads(USER_RULES_FILE.read_text())
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if isinstance(v, list)}
+    except Exception as e:
+        print(f"[WARN] {USER_RULES_FILE} 로드 실패: {e}", file=sys.stderr)
+    return {}
 
 
 def determine_tags(folder: str, filename: str, content: str) -> list[str]:
@@ -83,6 +98,17 @@ def insert_tags(content: str, tags: list[str]) -> str:
 
 def main():
     dry_run = "--dry-run" in sys.argv
+
+    # 사용자 룰 로드 후 기본 룰에 병합 (사용자 룰이 기본 룰 확장)
+    user_rules = load_user_rules()
+    for tag, keywords in user_rules.items():
+        if tag in TAG_RULES:
+            TAG_RULES[tag] = list(dict.fromkeys(TAG_RULES[tag] + keywords))
+        else:
+            TAG_RULES[tag] = keywords
+    if user_rules:
+        print(f"[INFO] 사용자 룰 {len(user_rules)}개 로드: {', '.join(user_rules)}")
+
     files = sorted(SESSIONS_DIR.rglob("*.md"))
     files = [f for f in files if f.name != "index.md"]
 
