@@ -42,6 +42,7 @@ mkdir -p "$HOME_DIR/scripts"
 mkdir -p "$CLAUDE_DIR/scripts"
 mkdir -p "$CLAUDE_DIR/logs"
 mkdir -p "$CLAUDE_DIR/skills/organize-sessions"
+mkdir -p "$CLAUDE_DIR/skills/load-context"
 mkdir -p "$CLAUDE_DIR/session-continuations"
 mkdir -p "$CLAUDE_DIR/session-context-shown"
 mkdir -p "$OUTPUT_DIR"
@@ -81,6 +82,12 @@ green "  완료"
 echo ""
 yellow "[3/6] 글로벌 스킬 설치..."
 cp "$SCRIPT_DIR/skill/SKILL.md" "$CLAUDE_DIR/skills/organize-sessions/SKILL.md"
+
+# load-context 스킬: CLAUDE_SESSIONS_DIR 플레이스홀더를 실제 경로로 교체 후 설치
+sed \
+  -e "s|CLAUDE_SESSIONS_DIR|${OUTPUT_DIR}|g" \
+  "$SCRIPT_DIR/skills/load-context/SKILL.md" > "$CLAUDE_DIR/skills/load-context/SKILL.md"
+
 green "  완료"
 
 # ─── 4. anthropic 패키지 설치 ────────────────────────────────────────────────
@@ -184,5 +191,9 @@ echo "사용법:"
 echo "  python3 ~/scripts/organize-sessions.py          # 전체 처리"
 echo "  python3 ~/scripts/organize-sessions.py --recent # 최근 7일"
 echo "  python3 ~/scripts/organize-sessions.py --regen  # AI 요약 재생성"
+echo ""
+echo "스킬:"
+echo "  /organize-sessions          # 세션 분류·요약"
+echo "  /load-context <query>       # 과거 세션 맥락 검색·로드"
 echo ""
 echo "새 Claude 세션 시작 시 관련 이전 세션을 자동으로 제안합니다."
