@@ -12,6 +12,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 # ─── 경로 설정 ────────────────────────────────────────────────────────────────
 HOME = Path.home()
@@ -47,7 +48,7 @@ def slugify(text: str) -> str:
     return text[:60].lower()
 
 
-def find_jsonl(session_id: str) -> Path | None:
+def find_jsonl(session_id: str) -> Optional[Path]:
     """session_id로 JSONL 파일 찾기"""
     candidates = list(PROJECTS_DIR.glob(f"*/{session_id}.jsonl"))
     return candidates[0] if candidates else None
@@ -278,7 +279,69 @@ JSON만 응답:
         print("  신규 매핑 없음")
 
 
-def get_chosen_file(session_id: str) -> Path | None:
+def extract_meta_from_jsonl(jsonl_path: Path) -> Optional[dict]:
+    """JSONL 파일에서 session-meta 구조로 메타데이터 추출 (session-meta 없는 신규 세션용)"""
+    session_id = None
+    start_time = None
+    end_time = None
+    first_prompt = None
+    cwd = None
+
+    with open(jsonl_path) as f:
+        for line in f:
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            if not session_id:
+                session_id = d.get("sessionId")
+
+            if not cwd and d.get("cwd"):
+                cwd = d.get("cwd")
+
+            ts = d.get("timestamp")
+            if ts:
+                if not start_time:
+                    start_time = ts
+                end_time = ts
+
+            if not first_prompt and d.get("type") == "user" and not d.get("isMeta"):
+                msg = d.get("message", {})
+                content = msg.get("content", "")
+                if isinstance(content, str) and content.strip():
+                    first_prompt = content.strip()
+                elif isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            text = item["text"].strip()
+                            if text:
+                                first_prompt = text
+                                break
+
+    if not session_id or not start_time:
+        return None
+
+    duration = 0.0
+    if start_time and end_time:
+        try:
+            from datetime import datetime as _dt
+            dt_s = _dt.fromisoformat(start_time.replace("Z", "+00:00"))
+            dt_e = _dt.fromisoformat(end_time.replace("Z", "+00:00"))
+            duration = (dt_e - dt_s).total_seconds() / 60
+        except Exception:
+            pass
+
+    return {
+        "session_id": session_id,
+        "start_time": start_time,
+        "first_prompt": first_prompt or "",
+        "project_path": cwd or "",
+        "duration_minutes": duration,
+    }
+
+
+def get_chosen_file(session_id: str) -> Optional[Path]:
     """이 세션이 이어쓰기로 선택된 파일 경로 반환"""
     marker = CONTINUATIONS_DIR / f"{session_id}.chosen"
     if not marker.exists():
@@ -431,33 +494,64 @@ def process_sessions(recent_only: bool = False, regen: bool = False):
     index_entries = []
     new_sessions_data: list[dict] = []
 
-    meta_files = sorted(META_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    from datetime import timedelta
+    cutoff_dt = datetime.now(timezone.utc) - timedelta(days=7) if recent_only else None
+    cutoff_str = cutoff_dt.isoformat() if cutoff_dt else None
 
-    # --recent: 최근 7일만
-    if recent_only:
-        from datetime import timedelta
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    # session-meta 기반 세션 수집
+    meta_files = sorted(META_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if cutoff_str:
         meta_files_filtered = []
         for mf in meta_files:
             try:
                 with open(mf) as f:
                     meta = json.load(f)
-                if meta.get("start_time", "") >= cutoff:
+                if meta.get("start_time", "") >= cutoff_str:
                     meta_files_filtered.append(mf)
             except Exception:
                 pass
         meta_files = meta_files_filtered
 
-    total = len(meta_files)
+    # JSONL 직접 스캔 (session-meta 없는 신규 세션)
+    jsonl_files = sorted(PROJECTS_DIR.glob("*/*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if cutoff_dt:
+        jsonl_files = [
+            jf for jf in jsonl_files
+            if datetime.fromtimestamp(jf.stat().st_mtime, tz=timezone.utc) >= cutoff_dt
+        ]
+
+    # session-meta에 없는 JSONL 세션을 meta 구조로 변환
+    meta_session_ids = set()
+    for mf in meta_files:
+        try:
+            with open(mf) as f:
+                meta_session_ids.add(json.load(f)["session_id"])
+        except Exception:
+            pass
+
+    jsonl_metas = []
+    for jf in jsonl_files:
+        sid = jf.stem
+        if sid in meta_session_ids or sid in processed:
+            continue
+        m = extract_meta_from_jsonl(jf)
+        if m:
+            jsonl_metas.append(m)
+
+    all_metas = []
+    for mf in meta_files:
+        try:
+            with open(mf) as f:
+                all_metas.append(json.load(f))
+        except Exception:
+            pass
+    all_metas.extend(jsonl_metas)
+    all_metas.sort(key=lambda m: m.get("start_time", ""), reverse=True)
+
+    total = len(all_metas)
     print(f"총 {total}개 세션 발견 (처리 완료: {len(processed)}개)")
 
-    for i, meta_file in enumerate(meta_files, 1):
-        try:
-            with open(meta_file) as f:
-                meta = json.load(f)
-        except Exception:
-            continue
-
+    for i, meta in enumerate(all_metas, 1):
         sid = meta["session_id"]
 
         if sid in processed:
